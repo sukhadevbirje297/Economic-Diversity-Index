@@ -41,8 +41,8 @@ NAME_MAP = {
     "OSMANABAD": "DHARASHIV",
     "DHARASHIV": "DHARASHIV",
     "GONDIA": "GONDIYA",
-    "MUMBAI CITY": "MUMBAI",
-    "MUMBAI SUBURBAN": "MUMBAI",
+    "MUMBAI CITY": "MUMBAI CITY",
+    "MUMBAI SUBURBAN": "MUMBAI SUBURBAN",
 }
 
 REQUIRED_COLUMNS = ["District", "Normalized_Diversity", "Rank"]
@@ -66,6 +66,8 @@ def display_name(value):
         "CHHATRAPATI SAMBHAJINAGAR": "Chhatrapati Sambhajinagar",
         "DHARASHIV": "Dharashiv",
         "GONDIYA": "Gondiya",
+        "MUMBAI CITY": "Mumbai City",
+        "MUMBAI SUBURBAN": "Mumbai Suburban",
     }
     return pretty.get(name, name.title())
 
@@ -283,31 +285,60 @@ try:
 
     geojson = prepare_geojson(geojson, geo_name_property)
 
-    # Plotly map data uses a stable normalized key for matching.
-    map_df = filtered.copy()
-    map_df["district_map_key"] = map_df["District"]
+    # IMPORTANT: draw ALL Maharashtra district boundaries first.
+    # Districts missing from Excel remain visible in light grey instead of white.
+    all_geo_rows = []
+    for feature in geojson.get("features", []):
+        props = feature.get("properties", {})
+        key = normalize_name(props.get(geo_name_property))
+        if key:
+            all_geo_rows.append({"district_map_key": key})
+
+    base_map_df = pd.DataFrame(all_geo_rows).drop_duplicates()
+    base_map_df["Map Status"] = "No Data"
+
+    # Only districts that actually have Excel data get a diversity colour.
+    data_map = filtered[["District", "Normalized_Diversity", "Rank", "Diversity Level"]].copy()
+    data_map["district_map_key"] = data_map["District"]
+    data_map["Map Status"] = "Data Available"
 
     fig = px.choropleth(
-        map_df,
+        base_map_df,
         geojson=geojson,
         locations="district_map_key",
         featureidkey="properties.district_map_key",
-        color="Diversity Level",
-        hover_name="District Display",
-        hover_data={
-            "Normalized_Diversity": ":.4f",
-            "Rank": True,
-            "Diversity Level": True,
-            "district_map_key": False,
-        },
-        color_discrete_map={
-            "Low": "#B22222",
-            "Medium": "#B8860B",
-            "High": "#006400",
-        },
+        color="Map Status",
+        hover_name="district_map_key",
+        color_discrete_map={"No Data": "#D9D9D9"},
+        hover_data={"district_map_key": False, "Map Status": True},
     )
 
-    labels = make_label_data(geojson, geo_name_property, filtered)
+    # Overlay the Excel data on top of the complete grey base map.
+    if not data_map.empty:
+        data_fig = px.choropleth(
+            data_map,
+            geojson=geojson,
+            locations="district_map_key",
+            featureidkey="properties.district_map_key",
+            color="Diversity Level",
+            hover_name="district_map_key",
+            hover_data={
+                "Normalized_Diversity": ":.4f",
+                "Rank": True,
+                "Diversity Level": True,
+                "district_map_key": False,
+            },
+            color_discrete_map={
+                "Low": "#B22222",
+                "Medium": "#B8860B",
+                "High": "#006400",
+            },
+        )
+        for trace in data_fig.data:
+            fig.add_trace(trace)
+
+    # Labels for every district in the GeoJSON, including No Data districts.
+    labels = make_label_data(geojson, geo_name_property, df)
     if not labels.empty:
         labels["District Label"] = labels["District"].map(display_name)
         label_text = []
@@ -315,7 +346,7 @@ try:
             if pd.notna(rank):
                 label_text.append(f"<b>{name}</b><br>Rank: {int(rank)}")
             else:
-                label_text.append(f"<b>{name}</b><br>Rank: No Data")
+                label_text.append(f"<b>{name}</b><br>No Data")
 
         fig.add_trace(
             go.Scattergeo(
@@ -323,7 +354,7 @@ try:
                 lat=labels["lat"],
                 text=label_text,
                 mode="text",
-                textfont=dict(size=9, color="black"),
+                textfont=dict(size=8, color="black"),
                 hoverinfo="text",
                 showlegend=False,
             )
@@ -336,12 +367,17 @@ try:
     )
 
     fig.update_layout(
-        height=650,
+        height=700,
         margin=dict(r=0, t=10, l=0, b=0),
         legend_title_text="Diversity Level",
+        legend=dict(x=0.86, y=0.98),
     )
 
     st.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
+    st.caption(
+        "टीप: Excel मध्ये 34 districts चा data आहे. त्यामुळे उर्वरित districts पूर्ण map वर "
+        "दिसतील, पण त्यांना 'No Data' म्हणून grey दाखवले आहे."
+    )
 
 except Exception as exc:
     st.warning(
