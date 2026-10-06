@@ -2,11 +2,13 @@ import streamlit as st
 import pandas as pd
 import geopandas as gpd
 import folium
+from folium.features import DivIcon
 from streamlit_folium import st_folium
+import re
 
-# ---------------------------------------------------
-# Page Configuration
-# ---------------------------------------------------
+# =========================================================
+# PAGE
+# =========================================================
 
 st.set_page_config(
     page_title="Economic Diversity Index - Maharashtra",
@@ -14,44 +16,37 @@ st.set_page_config(
     layout="wide"
 )
 
-# ---------------------------------------------------
-# Title
-# ---------------------------------------------------
-
 st.title("📊 Economic Diversity Index - Maharashtra")
 st.markdown("### District-wise Economic Diversity Ranking")
 
-# ---------------------------------------------------
-# Load Excel Data
-# ---------------------------------------------------
+# =========================================================
+# LOAD FILES
+# =========================================================
 
 ranking = pd.read_excel("economic_diversity_ranking.xlsx")
-
-# ---------------------------------------------------
-# Load Maharashtra GeoJSON
-# ---------------------------------------------------
-
 gdf = gpd.read_file("maharashtra.geojson")
 
-# ---------------------------------------------------
-# Clean District Names
-# ---------------------------------------------------
+# =========================================================
+# CLEAN DISTRICT NAMES
+# =========================================================
 
-ranking["District"] = (
-    ranking["District"]
-    .astype(str)
-    .str.strip()
-)
+def clean_name(x):
+    x = str(x).strip().lower()
 
-gdf["district"] = (
-    gdf["district"]
-    .astype(str)
-    .str.strip()
-)
+    # Remove common words/symbols
+    x = x.replace("district", "")
+    x = x.replace("dist.", "")
+    x = re.sub(r"[^a-z0-9]", "", x)
 
-# ---------------------------------------------------
-# Handle Maharashtra District Name Differences
-# ---------------------------------------------------
+    return x
+
+
+ranking["District"] = ranking["District"].astype(str).str.strip()
+gdf["district"] = gdf["district"].astype(str).str.strip()
+
+# =========================================================
+# COMMON DISTRICT NAME CHANGES
+# =========================================================
 
 name_changes = {
     "Ahmednagar": "Ahilyanagar",
@@ -61,12 +56,15 @@ name_changes = {
 }
 
 ranking["District"] = ranking["District"].replace(name_changes)
-
 gdf["district"] = gdf["district"].replace(name_changes)
 
-# ---------------------------------------------------
-# Make sure numeric columns are numeric
-# ---------------------------------------------------
+# Create matching key
+ranking["match_key"] = ranking["District"].apply(clean_name)
+gdf["match_key"] = gdf["district"].apply(clean_name)
+
+# =========================================================
+# NUMERIC DATA
+# =========================================================
 
 ranking["Diversity_Index"] = pd.to_numeric(
     ranking["Diversity_Index"],
@@ -83,94 +81,76 @@ ranking["Rank"] = pd.to_numeric(
     errors="coerce"
 )
 
-# ---------------------------------------------------
-# HIGH / MEDIUM / LOW
-# No Quartiles
-#
-# Classification is based on Normalized Diversity:
-# Top third    = High
-# Middle third = Medium
-# Bottom third = Low
-# ---------------------------------------------------
+# =========================================================
+# SORT BY RANK
+# =========================================================
 
-ranking = ranking.sort_values(
-    "Normalized_Diversity",
-    ascending=False
-).reset_index(drop=True)
+ranking = ranking.sort_values("Rank").reset_index(drop=True)
+
+# =========================================================
+# HIGH / MEDIUM / LOW
+# NO QUARTILES
+# =========================================================
 
 n = len(ranking)
 
-def classify(index):
-    if index < n / 3:
+def get_category(i):
+    if i < n / 3:
         return "High"
-    elif index < (2 * n) / 3:
+    elif i < (2 * n) / 3:
         return "Medium"
     else:
         return "Low"
 
 ranking["Category"] = [
-    classify(i) for i in range(n)
+    get_category(i)
+    for i in range(n)
 ]
 
-# ---------------------------------------------------
-# Sidebar
-# ---------------------------------------------------
+# =========================================================
+# SUMMARY
+# =========================================================
 
-st.sidebar.header("📌 Economic Diversity")
-
-st.sidebar.markdown(
-    """
-    **Categories**
-
-    🟢 High  
-    🟡 Medium  
-    🔴 Low
-    """
-)
-
-# ---------------------------------------------------
-# Summary
-# ---------------------------------------------------
-
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    st.metric(
-        "Total Districts",
-        len(ranking)
-    )
+    st.metric("Total Districts", len(ranking))
 
 with col2:
-    high_count = (ranking["Category"] == "High").sum()
     st.metric(
-        "High Diversity",
-        high_count
+        "High",
+        int((ranking["Category"] == "High").sum())
     )
 
 with col3:
-    low_count = (ranking["Category"] == "Low").sum()
     st.metric(
-        "Low Diversity",
-        low_count
+        "Medium",
+        int((ranking["Category"] == "Medium").sum())
     )
 
-# ---------------------------------------------------
-# Ranking Table
-# ---------------------------------------------------
+with col4:
+    st.metric(
+        "Low",
+        int((ranking["Category"] == "Low").sum())
+    )
+
+# =========================================================
+# RANKING TABLE
+# =========================================================
 
 st.subheader("🏆 District-wise Ranking")
 
-display_columns = [
-    "Rank",
-    "District",
-    "Diversity_Index",
-    "Normalized_Diversity",
-    "Category"
-]
+table = ranking[
+    [
+        "Rank",
+        "District",
+        "Diversity_Index",
+        "Normalized_Diversity",
+        "Category"
+    ]
+].copy()
 
-display_data = ranking[display_columns].copy()
-
-display_data.columns = [
+table.columns = [
     "Rank",
     "District",
     "Diversity Index",
@@ -179,27 +159,51 @@ display_data.columns = [
 ]
 
 st.dataframe(
-    display_data,
+    table,
     use_container_width=True,
     hide_index=True
 )
 
-# ---------------------------------------------------
-# Merge Excel + GeoJSON
-# ---------------------------------------------------
+# =========================================================
+# MERGE MAP DATA
+# =========================================================
 
 map_data = gdf.merge(
-    ranking,
-    left_on="district",
-    right_on="District",
+    ranking[
+        [
+            "match_key",
+            "District",
+            "Diversity_Index",
+            "Normalized_Diversity",
+            "Rank",
+            "Category"
+        ]
+    ],
+    on="match_key",
     how="left"
 )
 
-# ---------------------------------------------------
-# Map
-# ---------------------------------------------------
+# =========================================================
+# MAP COLOURS
+# =========================================================
 
-st.subheader("🗺️ Maharashtra Economic Diversity Map")
+def get_color(category):
+
+    if category == "High":
+        return "#2ca25f"
+
+    if category == "Medium":
+        return "#ffd92f"
+
+    if category == "Low":
+        return "#de2d26"
+
+    # unmatched districts
+    return "#d9d9d9"
+
+# =========================================================
+# CREATE MAP
+# =========================================================
 
 m = folium.Map(
     location=[19.5, 75.3],
@@ -207,53 +211,29 @@ m = folium.Map(
     tiles="CartoDB positron"
 )
 
-# ---------------------------------------------------
-# Category Colours
-# ---------------------------------------------------
-
-category_colors = {
-    "High": "#2ca25f",
-    "Medium": "#ffd92f",
-    "Low": "#de2d26"
-}
-
-# ---------------------------------------------------
-# Function for Map Colours
-# ---------------------------------------------------
-
-def get_color(category):
-
-    if category == "High":
-        return "#2ca25f"
-
-    elif category == "Medium":
-        return "#ffd92f"
-
-    elif category == "Low":
-        return "#de2d26"
-
-    return "#bdbdbd"
-
-# ---------------------------------------------------
-# GeoJSON District Layer
-# ---------------------------------------------------
+# =========================================================
+# DISTRICT POLYGONS
+# =========================================================
 
 folium.GeoJson(
-    map_data,
-    name="Economic Diversity",
+    map_data.to_json(),
+    name="Districts",
+
     style_function=lambda feature: {
         "fillColor": get_color(
             feature["properties"].get("Category")
         ),
-        "color": "black",
+        "color": "#333333",
         "weight": 1,
         "fillOpacity": 0.75
     },
+
     highlight_function=lambda feature: {
         "weight": 3,
-        "color": "blue",
+        "color": "#0000ff",
         "fillOpacity": 0.9
     },
+
     tooltip=folium.GeoJsonTooltip(
         fields=[
             "district",
@@ -275,49 +255,104 @@ folium.GeoJson(
     )
 ).add_to(m)
 
-# ---------------------------------------------------
-# Map Legend
-# ---------------------------------------------------
+# =========================================================
+# DISTRICT NAME + RANK LABELS INSIDE MAP
+# =========================================================
+
+for _, row in map_data.iterrows():
+
+    if row.geometry is None:
+        continue
+
+    # Point guaranteed to be inside polygon
+    point = row.geometry.representative_point()
+
+    district = row.get("district", "")
+    rank = row.get("Rank", "")
+
+    if pd.isna(rank):
+        continue
+
+    # Short district name for map
+    label = f"""
+    <div style="
+        font-size: 10px;
+        font-weight: bold;
+        color: black;
+        text-align: center;
+        white-space: nowrap;
+        text-shadow:
+            1px 1px 2px white,
+            -1px -1px 2px white,
+            1px -1px 2px white,
+            -1px 1px 2px white;
+    ">
+        {district}<br>
+        Rank: {int(rank)}
+    </div>
+    """
+
+    folium.Marker(
+        location=[point.y, point.x],
+        icon=DivIcon(
+            icon_size=(150, 40),
+            icon_anchor=(75, 20),
+            html=label
+        )
+    ).add_to(m)
+
+# =========================================================
+# LEGEND
+# =========================================================
 
 legend_html = """
 <div style="
 position: fixed;
-bottom: 40px;
-left: 40px;
-width: 180px;
-height: 125px;
+bottom: 30px;
+left: 30px;
+width: 170px;
 background-color: white;
-border: 2px solid grey;
+border: 2px solid #555;
 z-index: 9999;
 font-size: 14px;
 padding: 10px;
+border-radius: 5px;
 ">
 
 <b>Economic Diversity</b><br><br>
 
+<div>
 <span style="
+display:inline-block;
+width:18px;
+height:18px;
 background:#2ca25f;
+margin-right:7px;
+"></span>
+High
+</div>
+
+<div>
+<span style="
+display:inline-block;
 width:18px;
 height:18px;
-display:inline-block;
-"></span>
-&nbsp; High<br>
-
-<span style="
 background:#ffd92f;
-width:18px;
-height:18px;
-display:inline-block;
+margin-right:7px;
 "></span>
-&nbsp; Medium<br>
+Medium
+</div>
 
+<div>
 <span style="
-background:#de2d26;
+display:inline-block;
 width:18px;
 height:18px;
-display:inline-block;
+background:#de2d26;
+margin-right:7px;
 "></span>
-&nbsp; Low
+Low
+</div>
 
 </div>
 """
@@ -326,25 +361,33 @@ m.get_root().html.add_child(
     folium.Element(legend_html)
 )
 
-# ---------------------------------------------------
-# Layer Control
-# ---------------------------------------------------
+# =========================================================
+# MAP TITLE
+# =========================================================
 
-folium.LayerControl().add_to(m)
+st.subheader("🗺️ Maharashtra District-wise Economic Diversity Map")
 
-# ---------------------------------------------------
-# Display Map
-# ---------------------------------------------------
+st.markdown(
+    """
+    **🟢 High** &nbsp;&nbsp;
+    **🟡 Medium** &nbsp;&nbsp;
+    **🔴 Low**
+    """
+)
+
+# =========================================================
+# SHOW MAP
+# =========================================================
 
 st_folium(
     m,
     width=None,
-    height=650
+    height=700
 )
 
-# ---------------------------------------------------
-# Data Information
-# ---------------------------------------------------
+# =========================================================
+# END
+# =========================================================
 
 st.markdown("---")
 
