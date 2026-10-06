@@ -93,9 +93,9 @@ mh = mh[mh["district"] != "Palghar"].copy()
 
 mh["district"] = mh["district"].replace({
 
-    "Ahmadnagar": "Ahmednagar",
+    "Ahmadnagar": "Ahilyanagar",
 
-    "Ahmednagar": "Ahmednagar",
+    "Ahmednagar": "Ahilyanagar",
 
     "Gondiya": "Gondia",
 
