@@ -19,9 +19,17 @@ mh = gpd.read_file("maharashtra.geojson")
 ranking["District"] = ranking["District"].str.title()
 
 ranking["District"] = ranking["District"].replace({
-    "Ahmadnagar": "Ahmednagar",
+    "Ahmadnagar": "Ahilyanagar",
     "Gondiya": "Gondia",
-    "Buldana": "Buldhana"
+    "Buldana": "Buldhana",
+    "Aurangabad": "Chhatrapati Sambhajinagar",
+    "Osmanabad": "Dharashiv"
+})
+
+mh["district"] = mh["district"].replace({
+    "Ahmednagar": "Ahilyanagar",
+    "Aurangabad": "Chhatrapati Sambhajinagar",
+    "Osmanabad": "Dharashiv"
 })
 
 # Quartiles
@@ -47,13 +55,6 @@ map_data = mh.merge(
     right_on="District",
     how="left"
 )
-
-# Updated district names for display
-map_data["district"] = map_data["district"].replace({
-    "Ahmednagar": "Ahilyanagar",
-    "Aurangabad": "Chhatrapati Sambhajinagar",
-    "Osmanabad": "Dharashiv"
-})
 
 # Category for missing districts (Palghar)
 map_data["Category"] = map_data["Category"].fillna("No Data")
