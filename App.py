@@ -4,26 +4,18 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
-# -----------------------------
-# Page Configuration
-# -----------------------------
 st.set_page_config(
     page_title="Economic Diversity Index",
     layout="wide"
 )
 
 st.title("Economic Diversity Index of Maharashtra Districts")
-st.markdown("District-wise Economic Diversity Ranking and Mapping")
 
-# -----------------------------
-# Load Data
-# -----------------------------
+# Load data
 ranking = pd.read_excel("economic_diversity_ranking.xlsx")
 mh = gpd.read_file("maharashtra.geojson")
 
-# -----------------------------
-# Data Cleaning
-# -----------------------------
+# District name cleaning
 ranking["District"] = ranking["District"].str.title()
 
 ranking["District"] = ranking["District"].replace({
@@ -32,15 +24,14 @@ ranking["District"] = ranking["District"].replace({
     "Buldana": "Buldhana"
 })
 
-# -----------------------------
 # Quartiles
-# -----------------------------
 Q1 = ranking["Normalized_Diversity"].quantile(0.25)
-Q2 = ranking["Normalized_Diversity"].quantile(0.50)
 Q3 = ranking["Normalized_Diversity"].quantile(0.75)
 
 def category(x):
-    if x <= Q1:
+    if pd.isna(x):
+        return "No Data"
+    elif x <= Q1:
         return "Low"
     elif x <= Q3:
         return "Medium"
@@ -49,9 +40,7 @@ def category(x):
 
 ranking["Category"] = ranking["Normalized_Diversity"].apply(category)
 
-# -----------------------------
-# Merge Data
-# -----------------------------
+# Merge
 map_data = mh.merge(
     ranking,
     left_on="district",
@@ -59,21 +48,17 @@ map_data = mh.merge(
     how="left"
 )
 
-# Updated district names
+# Updated district names for display
 map_data["district"] = map_data["district"].replace({
     "Ahmednagar": "Ahilyanagar",
     "Aurangabad": "Chhatrapati Sambhajinagar",
     "Osmanabad": "Dharashiv"
 })
 
-# -----------------------------
-# No Data Category
-# -----------------------------
+# Category for missing districts (Palghar)
 map_data["Category"] = map_data["Category"].fillna("No Data")
 
-# -----------------------------
 # Colors
-# -----------------------------
 color_dict = {
     "Low": "red",
     "Medium": "orange",
@@ -83,64 +68,32 @@ color_dict = {
 
 map_data["Color"] = map_data["Category"].map(color_dict)
 
-# -----------------------------
-# Summary Metrics
-# -----------------------------
-col1, col2, col3 = st.columns(3)
-
-col1.metric("Total Districts", len(map_data))
-col2.metric("Highest Rank", int(ranking["Rank"].min()))
-col3.metric("Lowest Rank", int(ranking["Rank"].max()))
-
-# -----------------------------
+# -------------------------
 # Ranking Table
-# -----------------------------
-st.subheader("District Ranking Table")
+# -------------------------
+st.subheader("District Ranking")
 
-ranking_display = ranking[
-    ["District", "Normalized_Diversity", "Rank", "Category"]
-].sort_values("Rank")
+ranking_display = ranking.sort_values("Rank")
 
 st.dataframe(
-    ranking_display,
+    ranking_display[["District",
+                     "Normalized_Diversity",
+                     "Rank"]],
     use_container_width=True
 )
 
-# -----------------------------
-# Download Button
-# -----------------------------
-excel_file = "economic_diversity_ranking.xlsx"
-
-with open(excel_file, "rb") as file:
+# Download button
+with open("economic_diversity_ranking.xlsx", "rb") as file:
     st.download_button(
-        label="Download Ranking Excel File",
+        label="Download Ranking Excel",
         data=file,
         file_name="economic_diversity_ranking.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-# -----------------------------
-# Search District
-# -----------------------------
-st.subheader("District Information")
-
-district_name = st.selectbox(
-    "Select District",
-    sorted(map_data["district"].unique())
-)
-
-district_info = map_data[map_data["district"] == district_name]
-
-st.dataframe(
-    district_info[
-        ["district", "Normalized_Diversity", "Rank", "Category"]
-    ],
-    use_container_width=True
-)
-
-# -----------------------------
+# -------------------------
 # Map
-# -----------------------------
+# -------------------------
 st.subheader("District-wise Economic Diversity Map")
 
 fig, ax = plt.subplots(figsize=(14, 12))
@@ -154,25 +107,21 @@ map_data.plot(
 
 for idx, row in map_data.iterrows():
 
-    if row.geometry is not None:
+    x = row.geometry.centroid.x
+    y = row.geometry.centroid.y
 
-        x = row.geometry.centroid.x
-        y = row.geometry.centroid.y
+    if pd.notna(row.get("Rank")):
+        label = f"{row['district']}\n{int(row['Rank'])}"
+    else:
+        label = f"{row['district']}\nNo Data"
 
-        rank_text = ""
-
-        if pd.notnull(row["Rank"]):
-            rank_text = int(row["Rank"])
-        else:
-            rank_text = "No Data"
-
-        ax.text(
-            x,
-            y,
-            f"{row['district']}\n{rank_text}",
-            fontsize=6,
-            ha="center"
-        )
+    ax.text(
+        x,
+        y,
+        label,
+        fontsize=6,
+        ha="center"
+    )
 
 legend_elements = [
     Patch(facecolor='red', edgecolor='black', label='Low'),
@@ -197,22 +146,26 @@ plt.axis("off")
 
 st.pyplot(fig)
 
-# -----------------------------
-# Top 10 Districts
-# -----------------------------
+# Top districts
 st.subheader("Top 10 Districts")
 
+top10 = ranking.sort_values("Rank").head(10)
+
 st.dataframe(
-    ranking.sort_values("Rank").head(10),
+    top10[["District",
+           "Normalized_Diversity",
+           "Rank"]],
     use_container_width=True
 )
 
-# -----------------------------
-# Bottom 10 Districts
-# -----------------------------
+# Bottom districts
 st.subheader("Bottom 10 Districts")
 
+bottom10 = ranking.sort_values("Rank").tail(10)
+
 st.dataframe(
-    ranking.sort_values("Rank").tail(10),
+    bottom10[["District",
+              "Normalized_Diversity",
+              "Rank"]],
     use_container_width=True
 )
