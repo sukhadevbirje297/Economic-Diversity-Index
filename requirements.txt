@@ -1,6 +1,8 @@
 streamlit
 pandas
 geopandas
-folium
-streamlit-folium
+matplotlib
 openpyxl
+shapely
+fiona
+pyproj
