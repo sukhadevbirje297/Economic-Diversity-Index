@@ -3,6 +3,3 @@ pandas
 geopandas
 matplotlib
 openpyxl
-shapely
-fiona
-pyproj
